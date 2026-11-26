@@ -1,0 +1,6 @@
+{
+  "name": "Futsal Motion Studio",
+  "description": "Estudio de motion graphics dinámicos sobre historia, reglas, cancha y tácticas de futsal con locución sincronizada generada por IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
