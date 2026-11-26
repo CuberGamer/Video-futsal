@@ -9,6 +9,10 @@ import {
   stagger,
   type Rect,
 } from "./motionMath";
+import {
+  computeVideoCycleState,
+  techniqueMediaStore,
+} from "./techniqueVideoCache";
 
 export const LOGICAL_WIDTH = 1280;
 export const LOGICAL_HEIGHT = 720;
@@ -374,22 +378,14 @@ function drawBroadcastHeader(
 
   // Left emerald anchor bar
   ctx.fillStyle = PALETTE.emerald;
-  ctx.fillRect(48, 28, 4, 42);
+  ctx.fillRect(48, 30, 4, 30);
 
-  // Scene number & speaker
-  ctx.fillStyle = PALETTE.emeraldBright;
-  ctx.font = `600 13px ${FONT_MONO}`;
-  ctx.textBaseline = "top";
-  ctx.fillText(
-    `${activeScene.scene.sceneNumber.toUpperCase()} · ${activeScene.scene.speaker.toUpperCase()} · ${activeScene.scene.scriptTimeRange}`,
-    64,
-    27
-  );
-
-  // Title
+  // Title only (no scene number, speaker, or time range)
   ctx.fillStyle = PALETTE.textPrimary;
   ctx.font = `700 28px ${FONT_DISPLAY}`;
-  ctx.fillText(activeScene.scene.title.toUpperCase(), 64, 44);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(activeScene.scene.title.toUpperCase(), 64, 31);
 
   // Top-right progress indicator (scene index)
   ctx.textAlign = "right";
@@ -397,7 +393,7 @@ function drawBroadcastHeader(
   ctx.fillStyle = PALETTE.textMuted;
   ctx.font = `500 13px ${FONT_MONO}`;
   ctx.fillText(
-    `${String(snapshot.sceneIndex + 1).padStart(2, "0")} / 09`,
+    `${String(snapshot.sceneIndex + 1).padStart(2, "0")} / 10`,
     LOGICAL_WIDTH - 48,
     34
   );
@@ -504,8 +500,10 @@ function renderScene2(
     // Left Card: Stylized Map of Uruguay & Montevideo Pin
     drawCard(ctx, 56, 108, 480, 444, 16, "rgba(15, 23, 34, 0.85)", "rgba(52, 211, 153, 0.25)");
     ctx.save();
-    ctx.translate(296, 330);
-    const scale = lerp(0.92, 1.02, p);
+    const mapCenterX = 296;
+    const mapCenterY = 278;
+    const scale = lerp(0.84, 0.92, p);
+    ctx.translate(mapCenterX, mapCenterY);
     ctx.scale(scale, scale);
 
     // Stylized Uruguay silhouette polygon
@@ -526,11 +524,11 @@ function renderScene2(
     ctx.stroke();
 
     // Montevideo pin (southern coast)
-    const pinX = -22;
-    const pinY = 112;
+    const pinX = -20;
+    const pinY = 108;
     const pulse = (globalTime * 1.4) % 1;
     ctx.beginPath();
-    ctx.arc(pinX, pinY, 10 + pulse * 26, 0, Math.PI * 2);
+    ctx.arc(pinX, pinY, 10 + pulse * 24, 0, Math.PI * 2);
     ctx.strokeStyle = `rgba(245, 158, 11, ${(1 - pulse) * 0.8})`;
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -539,14 +537,35 @@ function renderScene2(
     ctx.arc(pinX, pinY, 8, 0, Math.PI * 2);
     ctx.fillStyle = PALETTE.amber;
     ctx.fill();
+    ctx.restore();
 
+    // Clean callout badge below the silhouette so text never overlaps the border
+    const pinWorldX = mapCenterX + -20 * scale;
+    const pinWorldY = mapCenterY + 108 * scale;
+    const badgeX = 96;
+    const badgeY = 446;
+    const badgeW = 400;
+    const badgeH = 78;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.55)";
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pinWorldX, pinWorldY + 10);
+    ctx.lineTo(mapCenterX, badgeY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    drawCard(ctx, badgeX, badgeY, badgeW, badgeH, 12, "rgba(8, 13, 19, 0.92)", "rgba(245, 158, 11, 0.45)", 1.5);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     ctx.fillStyle = "#F8FAFC";
     ctx.font = `700 24px ${FONT_DISPLAY}`;
-    ctx.textAlign = "left";
-    ctx.fillText("MONTEVIDEO, URUGUAY", pinX + 18, pinY - 6);
+    ctx.fillText("MONTEVIDEO, URUGUAY", mapCenterX, badgeY + 28);
     ctx.fillStyle = PALETTE.amber;
     ctx.font = `600 14px ${FONT_MONO}`;
-    ctx.fillText("1930 · YMCA", pinX + 18, pinY + 14);
+    ctx.fillText("1930 · YMCA", mapCenterX, badgeY + 55);
     ctx.restore();
 
     // Right side: Creator + 4 Sports merging into Futsal
@@ -772,47 +791,57 @@ function renderScene3(
       ctx.globalAlpha = s;
       drawCard(ctx, startX, cy, cardW, 184, 14, PALETTE.bgCard, item.color, 1.5);
 
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
       ctx.fillStyle = item.color;
       ctx.font = `700 15px ${FONT_MONO}`;
-      ctx.fillText(`AJUSTE ${item.num}`, startX + 26, cy + 36);
+      ctx.fillText(`AJUSTE ${item.num}`, startX + 24, cy + 44);
 
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = `700 28px ${FONT_DISPLAY}`;
-      ctx.fillText(item.title, startX + 26, cy + 76);
-
-      ctx.fillStyle = PALETTE.textMuted;
-      ctx.font = `500 16px ${FONT_SANS}`;
-      ctx.fillText(item.desc, startX + 26, cy + 114);
-
-      // Animated mini vector icon on right side of card
-      const ix = startX + cardW - 58;
-      const iy = cy + 92;
+      // Animated mini vector icon in top-right corner away from title & description
+      const ix = startX + cardW - 46;
+      const iy = cy + 44;
       if (i === 2) {
         // 4s clock ring
         const sweep = ((globalTime * 0.8) % 1) * Math.PI * 2;
         ctx.beginPath();
-        ctx.arc(ix, iy, 28, -Math.PI / 2, -Math.PI / 2 + sweep);
+        ctx.arc(ix, iy, 23, -Math.PI / 2, -Math.PI / 2 + sweep);
         ctx.strokeStyle = PALETTE.amber;
-        ctx.lineWidth = 4;
+        ctx.lineWidth = 3.5;
         ctx.stroke();
         ctx.fillStyle = "#FFFFFF";
-        ctx.font = `700 18px ${FONT_MONO}`;
+        ctx.font = `700 15px ${FONT_MONO}`;
         ctx.textAlign = "center";
-        ctx.fillText("4s", ix, iy + 6);
+        ctx.textBaseline = "middle";
+        ctx.fillText("4s", ix, iy + 0.5);
       } else if (i === 3) {
         // Low bounce ball
-        const bounce = Math.abs(Math.sin(globalTime * 4)) * 16;
-        drawFutsalBall(ctx, ix, iy + 14 - bounce, 18, globalTime * 2);
+        const bounce = Math.abs(Math.sin(globalTime * 4)) * 10;
+        drawFutsalBall(ctx, ix, iy + 6 - bounce, 16, globalTime * 2);
       } else {
         ctx.beginPath();
-        ctx.arc(ix, iy, 24, 0, Math.PI * 2);
+        ctx.arc(ix, iy, 22, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255,255,255,0.06)";
         ctx.fill();
         ctx.fillStyle = item.color;
-        ctx.font = `700 18px ${FONT_MONO}`;
+        ctx.font = `700 16px ${FONT_MONO}`;
         ctx.textAlign = "center";
-        ctx.fillText(item.num, ix, iy + 6);
+        ctx.textBaseline = "middle";
+        ctx.fillText(item.num, ix, iy + 0.5);
       }
+
+      // Title & wrapped description in full lower area (below circle)
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = `700 26px ${FONT_DISPLAY}`;
+      ctx.fillText(item.title, startX + 24, cy + 102);
+
+      ctx.fillStyle = PALETTE.textMuted;
+      ctx.font = `500 15px ${FONT_SANS}`;
+      const descLines = wrapLines(ctx, item.desc, cardW - 48);
+      descLines.forEach((line, li) => {
+        ctx.fillText(line, startX + 24, cy + 134 + li * 21);
+      });
       ctx.restore();
     });
   } else {
@@ -854,7 +883,15 @@ function renderScene4(
   globalTime: number
 ) {
   const { cueIndexInScene, cueProgress } = snapshot;
-  const courtRect: Rect = { x: 140, y: 158, w: 850, h: 366 };
+  const centeredX = (LOGICAL_WIDTH - 850) / 2;
+  const centerSlide =
+    cueIndexInScene === 0 ? 0 : easeInOutCubic(clamp01(cueProgress / 0.14));
+  const courtRect: Rect = {
+    x: lerp(140, centeredX, centerSlide),
+    y: 158,
+    w: 850,
+    h: 366,
+  };
 
   if (cueIndexInScene === 0) {
     const drawP = easeOutExpo(clamp01(cueProgress * 1.5));
@@ -918,7 +955,7 @@ function renderScene4(
       centerCircle: centerActive,
     });
 
-    // Callout badges around the court
+    // Callout badges symmetrically centered above the centered court
     const callouts = [
       {
         active: areaActive,
@@ -930,7 +967,7 @@ function renderScene4(
       },
       {
         active: penal6Active,
-        x: 430,
+        x: 440,
         y: 112,
         title: "PUNTO PENAL",
         val: "6 m",
@@ -938,7 +975,7 @@ function renderScene4(
       },
       {
         active: penal10Active,
-        x: 620,
+        x: 640,
         y: 112,
         title: "2.° PENAL (FALTAS)",
         val: "10 m",
@@ -954,7 +991,7 @@ function renderScene4(
       },
       {
         active: centerActive,
-        x: 1030,
+        x: 1040,
         y: 112,
         title: "CÍRCULO CENTRAL",
         val: "Radio 3 m",
@@ -977,6 +1014,7 @@ function renderScene4(
         c.active ? 2 : 1
       );
       ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
       ctx.fillStyle = c.color;
       ctx.font = `700 12px ${FONT_MONO}`;
       ctx.fillText(c.title, c.x, c.y + 6);
@@ -1005,6 +1043,342 @@ function renderScene4(
       ctx.stroke();
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// SCENE 5: TÉCNICAS (Primer plano en recuadro con videos ralentizados)
+// ---------------------------------------------------------------------------
+interface TechniqueMeta {
+  tabLabel: string;
+  title: string;
+  tagline: string;
+  accent: string;
+  points: { label: string; detail: string }[];
+}
+
+const TECHNIQUE_CARDS: TechniqueMeta[] = [
+  {
+    tabLabel: "01 PASE",
+    title: "PASE",
+    tagline: "ESPACIO REDUCIDO Y PRECISIÓN",
+    accent: PALETTE.emeraldBright,
+    points: [
+      { label: "Interior del pie", detail: "Control seguro y toques cortos precisos" },
+      { label: "Empeine", detail: "Envíos largos y cambios de frente firmes" },
+      { label: "Ritmo rápido", detail: "Ejecución limpia bajo presión reducida" },
+    ],
+  },
+  {
+    tabLabel: "02 REMATE",
+    title: "REMATE",
+    tagline: "POTENCIA, PUNTERÍA Y APOYO",
+    accent: PALETTE.amber,
+    points: [
+      { label: "Superficies clave", detail: "Empeine (potencia), interior (precisión), puntera (apuro)" },
+      { label: "Mirar el arco", detail: "Ubicar al arquero y los palos antes de patear" },
+      { label: "Pie de sostén", detail: "Apoyo firme al costado para dar equilibrio" },
+    ],
+  },
+  {
+    tabLabel: "03 CONTROL",
+    title: "CONTROL",
+    tagline: "ORIENTACIÓN AL ESPACIO LIBRE",
+    accent: PALETTE.sky,
+    points: [
+      { label: "Con el pie", detail: "Interior, exterior o planta para pisar el balón" },
+      { label: "Pelotas altas", detail: "Amortiguación suave y dirigida con el pecho" },
+      { label: "Perfil previo", detail: "Orientar el cuerpo hacia el espacio libre" },
+    ],
+  },
+  {
+    tabLabel: "04 REGATE",
+    title: "REGATE O PIQUE",
+    tagline: "DESEQUILIBRIO EN UNO CONTRA UNO",
+    accent: PALETTE.amber,
+    points: [
+      { label: "Cambio de ritmo", detail: "Frenadas, arranques y cambios de dirección" },
+      { label: "Fintas y amagues", detail: "Engañar con el cuerpo antes del desborde" },
+      { label: "Recursos clásicos", detail: "La bicicleta, el caño y la pisada con suela" },
+    ],
+  },
+  {
+    tabLabel: "05 CONDUCCIÓN",
+    title: "CONDUCCIÓN",
+    tagline: "PROTECCIÓN Y VISIÓN DE JUEGO",
+    accent: PALETTE.emeraldBright,
+    points: [
+      { label: "Toques cortos", detail: "Mantener el balón cerca para girar al instante" },
+      { label: "Cabeza levantada", detail: "Leer pases, líneas de presión y espacios" },
+      { label: "Cuerpo protector", detail: "Interponerse entre el rival y la pelota" },
+    ],
+  },
+  {
+    tabLabel: "06 DEFENSA",
+    title: "DEFENSA",
+    tagline: "PRESIÓN, COBERTURA Y ORDEN",
+    accent: PALETTE.coral,
+    points: [
+      { label: "Marcaje y presión", detail: "Seguimiento individual sobre quien tiene el balón" },
+      { label: "Cobertura y quite", detail: "Respaldar al compañero y recuperar sin falta" },
+      { label: "Marca en el área", detail: "Cierre ordenado de líneas de tiro y pase" },
+    ],
+  },
+];
+
+function drawImageCover(
+  ctx: CanvasRenderingContext2D,
+  source: HTMLVideoElement | HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+  extraScale: number = 1
+) {
+  const sw =
+    source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+  const sh =
+    source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+  if (!sw || !sh) return;
+
+  const scale = Math.max(dw / sw, dh / sh) * extraScale;
+  const drawW = sw * scale;
+  const drawH = sh * scale;
+  const drawX = dx + (dw - drawW) / 2;
+  const drawY = dy + (dh - drawH) / 2;
+  ctx.drawImage(source, drawX, drawY, drawW, drawH);
+}
+
+function renderScene5(
+  ctx: CanvasRenderingContext2D,
+  snapshot: PlaybackSnapshot,
+  globalTime: number
+) {
+  const { activeCue, cueIndexInScene, cueProgress, cueElapsed } = snapshot;
+  const tech = TECHNIQUE_CARDS[cueIndexInScene] ?? TECHNIQUE_CARDS[0];
+  const speakerLabel = (activeCue.cueSpeaker ?? "Jairo").toUpperCase();
+  const enter = easeOutExpo(clamp01(cueElapsed / 0.45));
+
+  // Top technique selector strip (6 tabs across x=64..1216)
+  for (let i = 0; i < TECHNIQUE_CARDS.length; i++) {
+    const item = TECHNIQUE_CARDS[i];
+    const x = 64 + i * 194;
+    const w = 182;
+    const isActive = i === cueIndexInScene;
+    drawCard(
+      ctx,
+      x,
+      98,
+      w,
+      40,
+      8,
+      isActive ? "rgba(15, 23, 34, 0.96)" : "rgba(15, 23, 34, 0.55)",
+      isActive ? tech.accent : PALETTE.border,
+      isActive ? 2 : 1
+    );
+    ctx.save();
+    ctx.fillStyle = isActive ? tech.accent : PALETTE.textMuted;
+    ctx.font = `700 13px ${FONT_MONO}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(item.tabLabel, x + w / 2, 118);
+    ctx.restore();
+  }
+
+  // Left framed video container ("recuadro", 16:9 close-up demonstration)
+  const frameX = 64;
+  const frameY = 156;
+  const frameW = 708;
+  const frameH = 398;
+
+  ctx.save();
+  ctx.globalAlpha = enter;
+  ctx.translate(lerp(-22, 0, enter), 0);
+
+  // Outer studio frame & accent glow
+  drawCard(
+    ctx,
+    frameX - 6,
+    frameY - 6,
+    frameW + 12,
+    frameH + 12,
+    18,
+    "rgba(10, 16, 24, 0.96)",
+    tech.accent,
+    2
+  );
+
+  const drawable = techniqueMediaStore.getDrawable(activeCue.visualTag);
+  const clipDur = drawable.spec?.clipDurationSec ?? 5.04;
+  const cycle = computeVideoCycleState(
+    cueElapsed,
+    clipDur,
+    activeCue.audioDurationSec
+  );
+
+  ctx.save();
+  roundRectPath(ctx, frameX, frameY, frameW, frameH, 13);
+  ctx.clip();
+
+  // Dark canvas behind video so cross-dissolve looks cinematic
+  ctx.fillStyle = "#070C12";
+  ctx.fillRect(frameX, frameY, frameW, frameH);
+
+  if (drawable.source) {
+    ctx.save();
+    ctx.globalAlpha = cycle.fadeAlpha;
+    const subtleZoom = drawable.isVideo
+      ? 1.005
+      : 1.01 + (cycle.targetVideoTime / Math.max(1, clipDur)) * 0.04;
+    drawImageCover(ctx, drawable.source, frameX, frameY, frameW, frameH, subtleZoom);
+    ctx.restore();
+  }
+
+  // Top & bottom subtle broadcast vignettes for readability
+  const topGrad = ctx.createLinearGradient(0, frameY, 0, frameY + 90);
+  topGrad.addColorStop(0, "rgba(6, 10, 16, 0.68)");
+  topGrad.addColorStop(1, "rgba(6, 10, 16, 0)");
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(frameX, frameY, frameW, 90);
+
+  const botGrad = ctx.createLinearGradient(0, frameY + frameH - 110, 0, frameY + frameH);
+  botGrad.addColorStop(0, "rgba(6, 10, 16, 0)");
+  botGrad.addColorStop(1, "rgba(6, 10, 16, 0.82)");
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(frameX, frameY + frameH - 110, frameW, 110);
+
+  // Viewfinder corner brackets inside frame
+  const bLen = 18;
+  const bPad = 14;
+  ctx.strokeStyle = "rgba(248, 250, 252, 0.45)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(frameX + bPad, frameY + bPad + bLen);
+  ctx.lineTo(frameX + bPad, frameY + bPad);
+  ctx.lineTo(frameX + bPad + bLen, frameY + bPad);
+  ctx.moveTo(frameX + frameW - bPad - bLen, frameY + bPad);
+  ctx.lineTo(frameX + frameW - bPad, frameY + bPad);
+  ctx.lineTo(frameX + frameW - bPad, frameY + bPad + bLen);
+  ctx.moveTo(frameX + bPad, frameY + frameH - bPad - bLen);
+  ctx.lineTo(frameX + bPad, frameY + frameH - bPad);
+  ctx.lineTo(frameX + bPad + bLen, frameY + frameH - bPad);
+  ctx.moveTo(frameX + frameW - bPad - bLen, frameY + frameH - bPad);
+  ctx.lineTo(frameX + frameW - bPad, frameY + frameH - bPad);
+  ctx.lineTo(frameX + frameW - bPad, frameY + frameH - bPad - bLen);
+  ctx.stroke();
+
+  // Bottom-left on-screen technique overlay inside recuadro
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = tech.accent;
+  ctx.font = `700 13px ${FONT_MONO}`;
+  ctx.fillText("TÉCNICA EN PANTALLA", frameX + 26, frameY + frameH - 46);
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = `800 32px ${FONT_DISPLAY}`;
+  ctx.fillText(tech.title, frameX + 26, frameY + frameH - 18);
+
+  // Clip slow-mo progress bar at bottom edge of video recuadro
+  const passProgress = clamp01(cycle.targetVideoTime / Math.max(0.5, clipDur));
+  ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.fillRect(frameX + 24, frameY + frameH - 9, frameW - 48, 3);
+  ctx.fillStyle = tech.accent;
+  ctx.fillRect(frameX + 24, frameY + frameH - 9, (frameW - 48) * passProgress, 3);
+
+  ctx.restore();
+  ctx.restore();
+
+  // Right breakdown card (x=796, y=156, w=420, h=398)
+  const cardX = 796;
+  const cardY = 156;
+  const cardW = 420;
+  const cardH = 398;
+
+  ctx.save();
+  ctx.globalAlpha = enter;
+  ctx.translate(lerp(24, 0, enter), 0);
+
+  drawCard(ctx, cardX, cardY, cardW, cardH, 16, PALETTE.bgCard, tech.accent, 1.5);
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = tech.accent;
+  ctx.font = `700 13px ${FONT_MONO}`;
+  ctx.fillText(
+    `TÉCNICA ${String(cueIndexInScene + 1).padStart(2, "0")} · ${speakerLabel}`,
+    cardX + 24,
+    cardY + 34
+  );
+
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = `800 38px ${FONT_DISPLAY}`;
+  ctx.fillText(tech.title, cardX + 24, cardY + 74);
+
+  ctx.fillStyle = PALETTE.textMuted;
+  ctx.font = `600 13px ${FONT_MONO}`;
+  ctx.fillText(tech.tagline, cardX + 24, cardY + 98);
+
+  // Divider
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.18)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cardX + 24, cardY + 114);
+  ctx.lineTo(cardX + cardW - 24, cardY + 114);
+  ctx.stroke();
+
+  // 3 Key Points (all stagger in within opening 0.7s, active phase highlighted)
+  const activePointIdx = Math.min(tech.points.length - 1, Math.floor(cueProgress * tech.points.length));
+  tech.points.forEach((pt, idx) => {
+    const pEnter = easeOutExpo(clamp01((cueElapsed - idx * 0.14) / 0.34));
+    const isHighlighted = idx === activePointIdx;
+    const rowY = cardY + 132 + idx * 84;
+    ctx.save();
+    ctx.globalAlpha = enter * pEnter * (isHighlighted ? 1 : 0.78);
+
+    drawCard(
+      ctx,
+      cardX + 22,
+      rowY,
+      cardW - 44,
+      72,
+      10,
+      isHighlighted ? "rgba(15, 23, 34, 0.92)" : "rgba(15, 23, 34, 0.65)",
+      isHighlighted ? tech.accent : "rgba(148, 163, 184, 0.2)",
+      isHighlighted ? 1.5 : 1
+    );
+
+    drawCard(
+      ctx,
+      cardX + 34,
+      rowY + 18,
+      34,
+      34,
+      8,
+      isHighlighted ? "rgba(16, 185, 129, 0.2)" : "rgba(15, 23, 34, 0.8)",
+      tech.accent,
+      1.2
+    );
+    ctx.fillStyle = tech.accent;
+    ctx.font = `700 14px ${FONT_MONO}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`0${idx + 1}`, cardX + 51, rowY + 35);
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = `700 16px ${FONT_SANS}`;
+    ctx.fillText(pt.label, cardX + 80, rowY + 26);
+
+    ctx.fillStyle = PALETTE.textMuted;
+    ctx.font = `500 13px ${FONT_SANS}`;
+    const wrapped = wrapLines(ctx, pt.detail, cardW - 114);
+    wrapped.slice(0, 2).forEach((line, li) => {
+      ctx.fillText(line, cardX + 80, rowY + 46 + li * 16);
+    });
+
+    ctx.restore();
+  });
+
+  ctx.restore();
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,6 +1417,8 @@ function renderScene6(
 
   ctx.save();
   ctx.globalAlpha = enter;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 
   if (ruleIdx === 0) {
     // 5 jugadores, 2x20 efectivo, 1 min timeout, sin offside
@@ -1059,6 +1435,7 @@ function renderScene6(
       ctx.globalAlpha = s;
       drawCard(ctx, x, y, 272, 310, 16, PALETTE.bgCard, card.c, 2);
       ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       ctx.fillStyle = card.c;
       ctx.font = `800 64px ${FONT_DISPLAY}`;
       ctx.fillText(card.big, x + 136, y + 120);
@@ -1090,12 +1467,13 @@ function renderScene6(
     ctx.stroke();
 
     ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     ctx.fillStyle = "#FFFFFF";
-    ctx.font = `800 108px ${FONT_DISPLAY}`;
-    ctx.fillText(`${countVal}s`, cx, cy + 28);
+    ctx.font = `800 100px ${FONT_DISPLAY}`;
+    ctx.fillText(`${countVal}s`, cx, cy - 22);
     ctx.fillStyle = PALETTE.amber;
-    ctx.font = `700 18px ${FONT_MONO}`;
-    ctx.fillText("LÍMITE MÁXIMO", cx, cy + 72);
+    ctx.font = `700 17px ${FONT_MONO}`;
+    ctx.fillText("LÍMITE MÁXIMO", cx, cy + 54);
 
     const situations = [
       "Arquero con la pelota en sus manos",
@@ -1110,12 +1488,13 @@ function renderScene6(
       ctx.globalAlpha = s;
       drawCard(ctx, 560, y, 640, 52, 10, PALETTE.bgCard, PALETTE.amber, 1.2);
       ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
       ctx.fillStyle = PALETTE.amber;
       ctx.font = `700 14px ${FONT_MONO}`;
-      ctx.fillText(`0${i + 1}`, 584, y + 31);
+      ctx.fillText(`0${i + 1}`, 584, y + 26);
       ctx.fillStyle = "#FFFFFF";
       ctx.font = `600 19px ${FONT_SANS}`;
-      ctx.fillText(txt, 632, y + 32);
+      ctx.fillText(txt, 632, y + 26);
     });
   } else if (ruleIdx === 2) {
     // Deliberate backpass to goalkeeper -> Indirect free kick
@@ -1130,28 +1509,37 @@ function renderScene6(
     drawFutsalBall(ctx, lerp(pStart.x, pEnd.x, passT), lerp(pStart.y, pEnd.y, passT), 11, globalTime * 6);
 
     drawCard(ctx, 770, 200, 440, 290, 16, PALETTE.bgCard, PALETTE.coral, 2);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
     ctx.fillStyle = PALETTE.coral;
     ctx.font = `700 15px ${FONT_MONO}`;
-    ctx.fillText("INFRACCIÓN TÉCNICA", 804, 246);
+    ctx.fillText("INFRACCIÓN TÉCNICA", 804, 248);
     ctx.fillStyle = "#FFFFFF";
     ctx.font = `800 38px ${FONT_DISPLAY}`;
-    ctx.fillText("PASE DELIBERADO", 804, 298);
-    ctx.fillText("AL ARQUERO", 804, 340);
+    ctx.fillText("PASE DELIBERADO", 804, 302);
+    ctx.fillText("AL ARQUERO", 804, 344);
     ctx.fillStyle = PALETTE.textMuted;
     ctx.font = `500 17px ${FONT_SANS}`;
-    ctx.fillText("Si la toma con la mano tras pase", 804, 386);
-    ctx.fillText("con el pie → Tiro Libre Indirecto.", 804, 412);
+    const descLines = wrapLines(
+      ctx,
+      "Si la toma con la mano tras pase con el pie → Tiro Libre Indirecto.",
+      372
+    );
+    descLines.forEach((line, li) => {
+      ctx.fillText(line, 804, 392 + li * 26);
+    });
   } else if (ruleIdx === 3) {
     // 6th accumulated foul -> 10m direct free kick without wall
     const foulNum = Math.min(6, 1 + Math.floor(clamp01(cueProgress * 1.4) * 6));
     drawCard(ctx, 72, 188, 420, 326, 16, PALETTE.bgCard, PALETTE.coral, 2);
     ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     ctx.fillStyle = PALETTE.textMuted;
     ctx.font = `700 16px ${FONT_MONO}`;
     ctx.fillText("FALTAS ACUMULADAS POR TIEMPO", 282, 236);
     ctx.fillStyle = foulNum >= 6 ? PALETTE.coral : PALETTE.amber;
     ctx.font = `800 132px ${FONT_DISPLAY}`;
-    ctx.fillText(`${foulNum}ª`, 282, 370);
+    ctx.fillText(`${foulNum}ª`, 282, 355);
     ctx.fillStyle = "#FFFFFF";
     ctx.font = `700 24px ${FONT_DISPLAY}`;
     ctx.fillText("TIRO DIRECTO SIN BARRERA · 10 M", 282, 464);
@@ -1166,6 +1554,9 @@ function renderScene6(
     drawPlayerToken(ctx, goalPt.x + 14, goalPt.y, "1", PALETTE.amber, "Arquero");
   } else if (ruleIdx === 4) {
     // Direct vs Indirect + 5m wall
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+
     drawCard(ctx, 72, 185, 540, 320, 16, PALETTE.bgCard, PALETTE.emeraldBright, 2);
     ctx.fillStyle = PALETTE.emeraldBright;
     ctx.font = `700 15px ${FONT_MONO}`;
@@ -1175,7 +1566,10 @@ function renderScene6(
     ctx.fillText("TIRO LIBRE DIRECTO", 104, 282);
     ctx.fillStyle = PALETTE.textMuted;
     ctx.font = `500 18px ${FONT_SANS}`;
-    ctx.fillText("Se puede marcar gol directamente al arco.", 104, 330);
+    const leftLines = wrapLines(ctx, "Se puede marcar gol directamente al arco.", 476);
+    leftLines.forEach((line, li) => {
+      ctx.fillText(line, 104, 326 + li * 24);
+    });
     drawArrow(ctx, 130, 415, 490, 415, PALETTE.emeraldBright, 4);
     drawFutsalBall(ctx, lerp(130, 460, (globalTime * 0.8) % 1), 415, 13, globalTime * 6);
 
@@ -1188,7 +1582,10 @@ function renderScene6(
     ctx.fillText("TIRO LIBRE INDIRECTO", 700, 282);
     ctx.fillStyle = PALETTE.textMuted;
     ctx.font = `500 18px ${FONT_SANS}`;
-    ctx.fillText("El gol vale solo si otro jugador toca la pelota.", 700, 330);
+    const rightLines = wrapLines(ctx, "El gol vale solo si otro jugador toca la pelota.", 476);
+    rightLines.forEach((line, li) => {
+      ctx.fillText(line, 700, 326 + li * 24);
+    });
     drawArrow(ctx, 725, 415, 920, 395, PALETTE.amber, 3.5);
     drawArrow(ctx, 930, 395, 1130, 435, PALETTE.emeraldBright, 3.5);
     drawPlayerToken(ctx, 925, 395, "2", PALETTE.amber, "2.° toque");
@@ -1653,6 +2050,9 @@ export function renderMotionFrame(
       break;
     case "scene-4":
       renderScene4(ctx, snapshot, globalTime);
+      break;
+    case "scene-5":
+      renderScene5(ctx, snapshot, globalTime);
       break;
     case "scene-6":
       renderScene6(ctx, snapshot, globalTime);

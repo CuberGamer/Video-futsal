@@ -108,7 +108,7 @@ export const InspectorDeck: React.FC<InspectorDeckProps> = ({
         {activeTab === "scenes" && (
           <>
             <p className="text-xs text-slate-400 pb-1">
-              Secuencia armada sin Intro, Escena 1 ni Escena 5 (reservadas para tu grabación).
+              Secuencia armada sin Intro ni Escena 1 (reservadas para tu grabación).
             </p>
 
             {timeline.scenes.map((ts) => {
@@ -240,7 +240,7 @@ export const InspectorDeck: React.FC<InspectorDeckProps> = ({
                         <div className="flex items-center gap-2 text-xs text-slate-300">
                           <span className="font-semibold">{cue.sceneNumber}</span>
                           <span aria-hidden="true">·</span>
-                          <span>{cue.speaker}</span>
+                          <span>{cue.cueSpeaker ?? cue.speaker}</span>
                           <span aria-hidden="true">·</span>
                           <span className="font-mono tabular-nums text-emerald-400">
                             {cue.audioDurationSec.toFixed(1)}s {isReady ? "IA" : "est."}
@@ -292,7 +292,7 @@ export const InspectorDeck: React.FC<InspectorDeckProps> = ({
                 >
                   <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
                     <span>
-                      {cue.sceneNumber} · {cue.speaker}
+                      {cue.sceneNumber} · {cue.cueSpeaker ?? cue.speaker}
                     </span>
                     <span className="font-mono tabular-nums">
                       {formatTimecode(cue.startTime)}

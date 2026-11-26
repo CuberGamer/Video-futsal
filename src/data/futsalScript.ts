@@ -6,6 +6,7 @@ export type SceneId =
   | "scene-2"
   | "scene-3"
   | "scene-4"
+  | "scene-5"
   | "scene-6"
   | "scene-7"
   | "scene-8"
@@ -21,6 +22,7 @@ export interface ScriptCue {
   defaultDurationSec: number;
   silent?: boolean;
   visualTag: string;
+  cueSpeaker?: string;
 }
 
 export interface ScriptScene {
@@ -146,13 +148,82 @@ export const FUTSAL_SCENES: ScriptScene[] = [
     ],
   },
   {
+    id: "scene-5",
+    sceneNumber: "Escena 5",
+    title: "Técnicas",
+    scriptTimeRange: "1:10 – 1:40",
+    speaker: "Jairo y Santos",
+    visualNote: "Primer plano en recuadro de cada técnica con su nombre en pantalla",
+    cues: [
+      {
+        id: "s5-c1",
+        sceneId: "scene-5",
+        cueSpeaker: "Jairo",
+        text: "Corto y preciso, por el espacio reducido. Con el interior del pie para controlar y con el empeine para pases largos.",
+        spokenText:
+          "Pase: Corto y preciso, por el espacio reducido. Con el interior del pie para controlar y con el empeine para pases largos.",
+        defaultDurationSec: 7.5,
+        visualTag: "tech-pase",
+      },
+      {
+        id: "s5-c2",
+        sceneId: "scene-5",
+        cueSpeaker: "Jairo",
+        text: "Con el empeine para potencia, con el interior para precisión y con la puntera en situaciones de apuro. Mirar el arco y apoyar bien el pie de sostén.",
+        spokenText:
+          "Remate: Con el empeine para potencia, con el interior para precisión y con la puntera en situaciones de apuro. Mirar el arco y apoyar bien el pie de sostén.",
+        defaultDurationSec: 9.0,
+        visualTag: "tech-remate",
+      },
+      {
+        id: "s5-c3",
+        sceneId: "scene-5",
+        cueSpeaker: "Santos",
+        text: "Con el interior, el exterior o la planta del pie, y con el pecho en pelotas altas. Orientar el cuerpo hacia el espacio libre antes de recibir.",
+        spokenText:
+          "Control: Con el interior, el exterior o la planta del pie, y con el pecho en pelotas altas. Orientar el cuerpo hacia el espacio libre antes de recibir.",
+        defaultDurationSec: 8.5,
+        visualTag: "tech-control",
+      },
+      {
+        id: "s5-c4",
+        sceneId: "scene-5",
+        cueSpeaker: "Santos",
+        text: "Superar a un rival con cambios de dirección, fintas, amagues o cambios de ritmo. Por ejemplo, la bicicleta, el caño o la suela.",
+        spokenText:
+          "Regate o pique: Superar a un rival con cambios de dirección, fintas, amagues o cambios de ritmo. Por ejemplo, la bicicleta, el caño o la suela.",
+        defaultDurationSec: 8.5,
+        visualTag: "tech-regate",
+      },
+      {
+        id: "s5-c5",
+        sceneId: "scene-5",
+        cueSpeaker: "Jairo",
+        text: "Toques cortos, la cabeza levantada y el cuerpo entre el rival y la pelota.",
+        spokenText:
+          "Conducción: Toques cortos, la cabeza levantada y el cuerpo entre el rival y la pelota.",
+        defaultDurationSec: 5.5,
+        visualTag: "tech-conduccion",
+      },
+      {
+        id: "s5-c6",
+        sceneId: "scene-5",
+        cueSpeaker: "Santos",
+        text: "Marcaje individual, presión sobre el jugador con pelota, cobertura de un compañero, quite sin falta y organización de la marca en el área.",
+        spokenText:
+          "Defensa: Marcaje individual, presión sobre el jugador con pelota, cobertura de un compañero, quite sin falta y organización de la marca en el área.",
+        defaultDurationSec: 8.5,
+        visualTag: "tech-defensa",
+      },
+    ],
+  },
+  {
     id: "scene-6",
     sceneNumber: "Escena 6",
     title: "Reglas Principales",
     scriptTimeRange: "1:40 – 2:15",
     speaker: "Moya",
     visualNote: "Íconos numerados animados para cada regla",
-    liveActionGapBefore: "Tu grabación: Escena 5 (1:10 – 1:40)",
     cues: [
       {
         id: "s6-c1",

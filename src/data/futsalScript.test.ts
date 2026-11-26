@@ -8,12 +8,13 @@ import {
   getNarratableCues,
 } from "./futsalScript";
 
-test("excludes Intro, Scene 1, and Scene 5 per user instruction", () => {
+test("includes Scene 5 (Técnicas) and excludes Intro and Scene 1", () => {
   const ids = FUTSAL_SCENES.map((s) => s.id);
   assert.deepEqual(ids, [
     "scene-2",
     "scene-3",
     "scene-4",
+    "scene-5",
     "scene-6",
     "scene-7",
     "scene-8",
@@ -21,6 +22,23 @@ test("excludes Intro, Scene 1, and Scene 5 per user instruction", () => {
     "scene-10",
     "credits",
   ]);
+});
+
+test("scene-5 contains all 6 futsal technique cues", () => {
+  const s5 = FUTSAL_SCENES.find((s) => s.id === "scene-5");
+  assert.ok(s5);
+  assert.equal(s5.cues.length, 6);
+  assert.deepEqual(
+    s5.cues.map((c) => c.visualTag),
+    [
+      "tech-pase",
+      "tech-remate",
+      "tech-control",
+      "tech-regate",
+      "tech-conduccion",
+      "tech-defensa",
+    ]
+  );
 });
 
 test("credits contain required sources and Instagram handle", () => {
@@ -58,10 +76,10 @@ test("getPlaybackSnapshot resolves active scene and cue accurately", () => {
   assert.equal(snapStart.activeScene.scene.id, "scene-2");
   assert.equal(snapStart.activeCue.id, "s2-c1");
 
-  const scene4 = tl.scenes.find((s) => s.scene.id === "scene-4")!;
-  const snapScene4 = getPlaybackSnapshot(tl, scene4.startTime + 0.5);
-  assert.equal(snapScene4.activeScene.scene.id, "scene-4");
-  assert.equal(snapScene4.activeCue.sceneId, "scene-4");
+  const scene5 = tl.scenes.find((s) => s.scene.id === "scene-5")!;
+  const snapScene5 = getPlaybackSnapshot(tl, scene5.startTime + 0.5);
+  assert.equal(snapScene5.activeScene.scene.id, "scene-5");
+  assert.equal(snapScene5.activeCue.sceneId, "scene-5");
 
   const snapEnd = getPlaybackSnapshot(tl, tl.totalDuration + 10);
   assert.equal(snapEnd.activeScene.scene.id, "credits");
@@ -70,5 +88,5 @@ test("getPlaybackSnapshot resolves active scene and cue accurately", () => {
 test("getNarratableCues excludes silent credits cue", () => {
   const narratable = getNarratableCues(FUTSAL_SCENES);
   assert.equal(narratable.some((c) => c.sceneId === "credits"), false);
-  assert.equal(narratable.length, 20);
+  assert.equal(narratable.length, 26);
 });

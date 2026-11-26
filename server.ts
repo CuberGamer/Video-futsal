@@ -76,13 +76,70 @@ function ensureWavBuffer(rawBuffer: Buffer, mimeType: string): { buffer: Buffer;
   };
 }
 
+function extractReadableGeminiError(err: unknown): { statusCode: number; message: string } {
+  const raw = err instanceof Error ? err.message : String(err);
+
+  if (raw.includes("no está configurada")) {
+    return { statusCode: 503, message: raw };
+  }
+
+  let parsedCode: number | undefined;
+  let parsedStatus = "";
+  let parsedMessage = raw;
+
+  try {
+    const obj = JSON.parse(raw) as {
+      error?: { code?: number; status?: string; message?: string };
+    };
+    if (obj?.error) {
+      parsedCode = obj.error.code;
+      parsedStatus = obj.error.status ?? "";
+      parsedMessage = obj.error.message ?? raw;
+    }
+  } catch {
+    // raw is plain text
+  }
+
+  if (
+    parsedCode === 429 ||
+    parsedStatus === "RESOURCE_EXHAUSTED" ||
+    raw.includes("429") ||
+    raw.includes("RESOURCE_EXHAUSTED") ||
+    raw.includes("quota")
+  ) {
+    return {
+      statusCode: 429,
+      message:
+        "Se alcanzó el límite de solicitudes de Gemini TTS (cuota gratuita agotada temporalmente). Espera unos minutos o selecciona una clave API con facturación en Settings > Secrets.",
+    };
+  }
+
+  if (
+    parsedCode === 403 ||
+    parsedStatus === "PERMISSION_DENIED" ||
+    raw.includes("API_KEY_INVALID") ||
+    raw.includes("PERMISSION_DENIED")
+  ) {
+    return {
+      statusCode: 403,
+      message:
+        "La clave API de Gemini no tiene permiso o es inválida. Verifica tu clave en Settings > Secrets.",
+    };
+  }
+
+  return {
+    statusCode: 502,
+    message: parsedMessage.slice(0, 280),
+  };
+}
+
 let workingStrategyIndex: number | null = null;
 
 async function generateSpeechWithRetry(
   text: string,
   voiceName: string,
   style: string,
-  maxRetries = 2
+  maxRetries = 1
 ): Promise<{ audioBase64: string; mimeType: string }> {
   const strategies: {
     model: string;
@@ -90,15 +147,13 @@ async function generateSpeechWithRetry(
     useSpeechMetadata: boolean;
     useSpeechConfig: boolean;
   }[] = [
-    { model: "gemini-3.8-flash-lite-tts", apiVersion: undefined, useSpeechMetadata: true, useSpeechConfig: true },
-    { model: "gemini-3.8-flash-lite-tts", apiVersion: "v1alpha", useSpeechMetadata: true, useSpeechConfig: true },
-    { model: "gemini-3.8-flash-lite-tts", apiVersion: undefined, useSpeechMetadata: false, useSpeechConfig: true },
-    { model: "gemini-2.5-flash-preview-tts", apiVersion: undefined, useSpeechMetadata: false, useSpeechConfig: true },
-    { model: "gemini-3.8-flash-lite-tts", apiVersion: undefined, useSpeechMetadata: false, useSpeechConfig: false },
+    { model: "gemini-3.8-flash-lite-tts", apiVersion: "v1beta", useSpeechMetadata: true, useSpeechConfig: true },
+    { model: "gemini-3.8-flash-tts", apiVersion: "v1beta", useSpeechMetadata: false, useSpeechConfig: true },
+    { model: "gemini-2.5-flash-preview-tts", apiVersion: "v1beta", useSpeechMetadata: false, useSpeechConfig: true },
   ];
 
   const orderedIndices =
-    workingStrategyIndex !== null
+    workingStrategyIndex !== null && workingStrategyIndex < strategies.length
       ? [workingStrategyIndex, ...strategies.map((_, idx) => idx).filter((idx) => idx !== workingStrategyIndex)]
       : strategies.map((_, idx) => idx);
 
@@ -126,16 +181,21 @@ async function generateSpeechWithRetry(
           };
         }
 
-        const response = await ai.models.generateContent({
-          model: strat.model,
-          contents: [
-            {
-              role: "user",
-              parts: [part as never],
-            },
-          ],
-          config: config as never,
-        });
+        const response = await Promise.race([
+          ai.models.generateContent({
+            model: strat.model,
+            contents: [
+              {
+                role: "user",
+                parts: [part as never],
+              },
+            ],
+            config: config as never,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Tiempo de espera agotado al contactar Gemini TTS.")), 18000)
+          ),
+        ]);
 
         const resPart = response.candidates?.[0]?.content?.parts?.[0];
         const inlineData = resPart?.inlineData;
@@ -154,7 +214,21 @@ async function generateSpeechWithRetry(
       } catch (err) {
         lastError = err;
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("INVALID_ARGUMENT") || msg.includes("Unknown name") || msg.includes("NOT_FOUND") || msg.includes("404") || msg.includes("400")) {
+
+        // Auth error: fail immediately without burning calls on other strategies
+        if (msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID") || msg.includes("403")) {
+          throw err;
+        }
+        // Quota/404/400 on this model: move straight to next distinct model without retrying same model
+        if (
+          msg.includes("RESOURCE_EXHAUSTED") ||
+          msg.includes("429") ||
+          msg.includes("INVALID_ARGUMENT") ||
+          msg.includes("Unknown name") ||
+          msg.includes("NOT_FOUND") ||
+          msg.includes("404") ||
+          msg.includes("400")
+        ) {
           break;
         }
         if (attempt < maxRetries) {
@@ -229,12 +303,23 @@ async function startServer() {
         cached: false,
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Error inesperado al generar la locución IA.";
-      const status =
-        message.includes("no está configurada") ? 503 : 502;
-      res.status(status).json({ error: message });
+      const mapped = extractReadableGeminiError(err);
+      res.status(mapped.statusCode).json({ error: mapped.message });
     }
+  });
+
+  // Guarantee /api/* routes always return JSON and never fall through to HTML SPA fallback
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Endpoint de API no encontrado." });
+  });
+
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith("/api")) {
+      const msg = err instanceof Error ? err.message : "Error interno en el servidor de API.";
+      res.status(500).json({ error: msg });
+      return;
+    }
+    next(err);
   });
 
   if (!isProduction) {
@@ -247,7 +332,7 @@ async function startServer() {
   } else {
     const distDir = path.resolve(__dirname, "dist");
     app.use(express.static(distDir));
-    app.get("/{*splat}", (_req, res) => {
+    app.get("*", (_req, res) => {
       const indexHtml = path.join(distDir, "index.html");
       if (fs.existsSync(indexHtml)) {
         res.sendFile(indexHtml);

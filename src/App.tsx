@@ -17,6 +17,8 @@ import {
   LOGICAL_WIDTH,
   renderMotionFrame,
 } from "./engine/sceneRenderer";
+import { collectDueSfxEvents } from "./engine/soundTimeline";
+import { techniqueMediaStore } from "./engine/techniqueVideoCache";
 import { ttsAudioEngine } from "./services/ttsService";
 
 export default function App() {
@@ -45,6 +47,7 @@ export default function App() {
   const lastSceneIdRef = useRef<string | null>(null);
   const globalClockRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const triggeredSfxRef = useRef<Set<string>>(new Set());
 
   const narratableCues = useMemo(() => getNarratableCues(FUTSAL_SCENES), []);
 
@@ -71,7 +74,13 @@ export default function App() {
 
   useEffect(() => {
     playbackRateRef.current = playbackRate;
+    ttsAudioEngine.setMusicRate(playbackRate);
   }, [playbackRate]);
+
+  // Preload Scene 5 close-up videos and high-res fallback frames
+  useEffect(() => {
+    techniqueMediaStore.preloadAll();
+  }, []);
 
   // Support ?autostart=1 for automated playback verification
   useEffect(() => {
@@ -103,6 +112,15 @@ export default function App() {
       );
       snap = getPlaybackSnapshot(timelineRef.current, previewTime);
     }
+    const activeTechTag =
+      snap.activeScene.scene.id === "scene-5" ? snap.activeCue.visualTag : null;
+    techniqueMediaStore.syncPlayback(
+      activeTechTag,
+      snap.cueElapsed,
+      snap.activeCue.audioDurationSec,
+      isPlayingRef.current,
+      playbackRateRef.current
+    );
     renderMotionFrame(ctx, snap, globalClockRef.current);
     ctx.restore();
   }, []);
@@ -116,14 +134,33 @@ export default function App() {
         if (active) drawCurrentFrame();
       });
     }
+    const t1 =
+      !isPlaying && snapshot.activeScene.scene.id === "scene-5"
+        ? window.setTimeout(() => {
+            if (active) drawCurrentFrame();
+          }, 140)
+        : null;
+    const t2 =
+      !isPlaying && snapshot.activeScene.scene.id === "scene-5"
+        ? window.setTimeout(() => {
+            if (active) drawCurrentFrame();
+          }, 400)
+        : null;
     return () => {
       active = false;
+      if (t1 !== null) window.clearTimeout(t1);
+      if (t2 !== null) window.clearTimeout(t2);
     };
-  }, [currentTime, timeline, drawCurrentFrame]);
+  }, [currentTime, timeline, isPlaying, snapshot.activeScene.scene.id, drawCurrentFrame]);
 
   // 60fps requestAnimationFrame loop active only while playing
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying) {
+      ttsAudioEngine.stopMusic();
+      return;
+    }
+
+    ttsAudioEngine.startMusic(playbackRateRef.current);
 
     let rafId = 0;
     let lastTs = performance.now();
@@ -142,6 +179,7 @@ export default function App() {
         setCurrentTime(tl.totalDuration);
         setIsPlaying(false);
         ttsAudioEngine.stopActiveVoice();
+        ttsAudioEngine.stopMusic();
 
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
           mediaRecorderRef.current.stop();
@@ -166,7 +204,8 @@ export default function App() {
         lastSceneIdRef.current = snap.activeScene.scene.id;
         ttsAudioEngine.playTransitionSfx();
       }
-      if (snap.activeCue.id !== lastCueIdRef.current) {
+      const prevCueId = lastCueIdRef.current;
+      if (snap.activeCue.id !== prevCueId) {
         lastCueIdRef.current = snap.activeCue.id;
         if (!snap.activeCue.silent) {
           ttsAudioEngine.playCueAudio(
@@ -179,12 +218,21 @@ export default function App() {
         }
       }
 
+      const dueSfx = collectDueSfxEvents(snap, triggeredSfxRef.current, prevCueId);
+      for (const ev of dueSfx) {
+        ttsAudioEngine.playSfx(ev.sfx);
+      }
+
       drawCurrentFrame();
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelAnimationFrame(rafId);
+      ttsAudioEngine.stopMusic();
+      techniqueMediaStore.syncPlayback(null, 0, 1, false, playbackRateRef.current);
+    };
   }, [isPlaying, drawCurrentFrame]);
 
   const syncDurationsFromCache = useCallback(
@@ -265,26 +313,26 @@ export default function App() {
     ttsAudioEngine.ensureContext();
 
     try {
-      const queue = [...narratableCues];
-      const concurrency = 2;
+      const queue = narratableCues.filter((c) => {
+        const voice = getVoiceForCue(c.id, speakerVoices);
+        return !ttsAudioEngine.getCached(c.id, voice);
+      });
 
-      const worker = async () => {
-        while (queue.length > 0) {
-          const cue = queue.shift();
-          if (!cue) break;
-          const voice = getVoiceForCue(cue.id, speakerVoices);
-          setGeneratingCueId(cue.id);
-          await ttsAudioEngine.generateCueVoice(
-            cue.id,
-            cue.spokenText,
-            voice,
-            "Locutor documental deportivo en español latinoamericano, claro, dinámico y entusiasta."
-          );
-          syncDurationsFromCache(speakerVoices);
+      for (let i = 0; i < queue.length; i++) {
+        const cue = queue[i];
+        const voice = getVoiceForCue(cue.id, speakerVoices);
+        setGeneratingCueId(cue.id);
+        await ttsAudioEngine.generateCueVoice(
+          cue.id,
+          cue.spokenText,
+          voice,
+          "Locutor documental deportivo en español latinoamericano, claro, dinámico y entusiasta."
+        );
+        syncDurationsFromCache(speakerVoices);
+        if (i < queue.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 350));
         }
-      };
-
-      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      }
       setGeneratingCueId(null);
     } catch (err) {
       setTtsError(
@@ -310,6 +358,7 @@ export default function App() {
       currentTimeRef.current = clamped;
       setCurrentTime(clamped);
 
+      triggeredSfxRef.current.clear();
       const snap = getPlaybackSnapshot(timeline, clamped);
       lastCueIdRef.current = snap.activeCue.id;
       lastSceneIdRef.current = snap.activeScene.scene.id;
@@ -333,12 +382,14 @@ export default function App() {
     if (isPlayingRef.current) {
       setIsPlaying(false);
       ttsAudioEngine.stopActiveVoice();
+      ttsAudioEngine.stopMusic();
     } else {
       let startAt = currentTimeRef.current;
       if (startAt >= timelineRef.current.totalDuration - 0.05) {
         startAt = 0;
         currentTimeRef.current = 0;
         setCurrentTime(0);
+        triggeredSfxRef.current.clear();
       }
       const snap = getPlaybackSnapshot(timelineRef.current, startAt);
       lastCueIdRef.current = snap.activeCue.id;
